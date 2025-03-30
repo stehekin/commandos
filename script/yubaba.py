@@ -3,18 +3,19 @@ import re
 import signal
 import os
 import requests
+import time
 
 def has_internet():
     """Checks if the node has internet access."""
     try:
-        requests.get("https://www.google.com", timeout=3) #quick test
+        requests.get("https://www.google.com", timeout=3)
         return True
     except requests.exceptions.RequestException:
         return False
 
 def get_control_from_github(github_url):
     """
-    Retrieves the content of the 'control' file from GitHub.
+    Retrieves the content of the 'control' file from GitHub, disabling cache.
 
     Args:
         github_url (str): The raw URL of the 'control' file.
@@ -24,10 +25,16 @@ def get_control_from_github(github_url):
     """
     if not has_internet():
         print("No internet access. Skipping GitHub control check.")
-        return None #return None, which enables process killing.
+        return None
     try:
         import requests
-        response = requests.get(github_url, timeout=5)
+        headers = {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' #pretend to be chrome
+        }
+        response = requests.get(github_url, headers=headers, timeout=5)
         response.raise_for_status()
         return response.text.strip()
     except ImportError:
@@ -94,7 +101,7 @@ def check_process(username, pattern, github_control_url):
 
 if __name__ == "__main__":
     username = "501"
-    pattern = r"vi"
+    pattern = r"vi(\s|$)"
     github_control_url = "https://raw.githubusercontent.com/stehekin/commandos/main/control"
 
     check_process(username, pattern, github_control_url)
