@@ -1,21 +1,31 @@
+#!/usr/bin/env python3
 import subprocess
 import re
 import signal
 import os
-import requests
-import time
+
+DEBUG_FILE = "/tmp/.commandos"
+
+def log(message):
+    """Logs messages to the debug file, overwriting it."""
+    try:
+        with open(DEBUG_FILE, "w") as f:
+            f.write(f"{message}\n")
+    except Exception as e:
+        print(f"Error writing to log file: {e}")  # Fallback to stdout if log file fails
 
 def has_internet():
-    """Checks if the node has internet access."""
+    """Checks if the node has internet access using /usr/bin/curl."""
     try:
-        requests.get("https://www.google.com", timeout=3)
+        command = ["/usr/bin/curl", "-s", "--head", "https://www.google.com", "-o", "/dev/null"]
+        subprocess.run(command, check=True) #check=True raises an exception on error
         return True
-    except requests.exceptions.RequestException:
+    except subprocess.CalledProcessError:
         return False
 
 def get_control_from_github(github_url):
     """
-    Retrieves the content of the 'control' file from GitHub, disabling cache.
+    Retrieves the content of the 'control' file from GitHub using /usr/bin/curl.
 
     Args:
         github_url (str): The raw URL of the 'control' file.
@@ -24,30 +34,39 @@ def get_control_from_github(github_url):
         str: The content of the file, or None if an error occurs.
     """
     if not has_internet():
-        print("No internet access. Skipping GitHub control check.")
+        log("No internet access. Skipping GitHub control check.")
         return None
     try:
-        import requests
-        headers = {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36' #pretend to be chrome
-        }
-        response = requests.get(github_url, headers=headers, timeout=5)
-        response.raise_for_status()
-        return response.text.strip()
-    except ImportError:
-        print("Error: 'requests' library is not installed. GitHub control check skipped.")
+        command = [
+            "/usr/bin/curl",
+            "-s",  # Silent mode
+            "-H", "Cache-Control: no-cache, no-store, must-revalidate",
+            "-H", "Pragma: no-cache",
+            "-H", "Expires: 0",
+            "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            github_url,
+        ]
+
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        stdout, stderr = process.communicate()
+
+        if process.returncode != 0:
+            log(f"Error fetching control file with /usr/bin/curl: {stderr}")
+            return None
+
+        return stdout.strip()
+
+    except FileNotFoundError:
+        log("Error: /usr/bin/curl command not found.")
         return None
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching control file from GitHub: {e}")
+    except Exception as e:
+        log(f"An error occurred: {e}")
         return None
 
 def kill_process(username, pattern):
     """
     Kills processes started by a given user that match a regex pattern,
-    checking both the command and its arguments. Uses SIGKILL.
+    checking both the command and its arguments (case-insensitive). Uses SIGKILL.
 
     Args:
         username (str): The username of the processes to target.
@@ -60,7 +79,7 @@ def kill_process(username, pattern):
         stdout, stderr = process.communicate()
 
         if process.returncode != 0:
-            print(f"Error getting process list: {stderr}")
+            log(f"Error getting process list: {stderr}")
             return
 
         lines = stdout.strip().split('\n')
@@ -72,15 +91,15 @@ def kill_process(username, pattern):
             pid_str, cmd = parts
             pid = int(pid_str.strip())
 
-            if re.search(pattern, cmd):
+            if re.search(pattern, cmd, re.IGNORECASE):
                 try:
                     os.kill(pid, signal.SIGKILL)
-                    print(f"Sent SIGKILL to process {pid}: {cmd}")
+                    log(f"Sent SIGKILL to process {pid}: {cmd}")
                 except OSError as e:
-                    print(f"Error sending SIGKILL to process {pid}: {e}")
+                    log(f"Error sending SIGKILL to process {pid}: {e}")
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        log(f"An error occurred: {e}")
 
 def check_process(username, pattern, github_control_url):
     """
@@ -94,14 +113,18 @@ def check_process(username, pattern, github_control_url):
     control_content = get_control_from_github(github_control_url)
 
     if control_content == "enable" or control_content is None:
-        print("Control file indicates 'enable' or fetch failed. Proceeding with process killing.")
+        log("Control file indicates 'enable' or fetch failed. Proceeding with process killing.")
         kill_process(username, pattern)
     else:
-        print("Control file indicates 'disable'. Skipping process killing.")
+        log("Control file indicates 'disable'. Skipping process killing.")
 
 if __name__ == "__main__":
-    username = "501"
-    pattern = r"vi(\s|$)"
     github_control_url = "https://raw.githubusercontent.com/stehekin/commandos/main/control"
 
-    check_process(username, pattern, github_control_url)
+    process_targets = [
+        {"username": "0", "pattern": r"protonvpn"},
+        {"username": "501", "pattern": r"minecraft"},
+    ]
+
+    for target in process_targets:
+        check_process(target["username"], target["pattern"], github_control_url)
