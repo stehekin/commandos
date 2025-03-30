@@ -4,6 +4,14 @@ import signal
 import os
 import requests
 
+def has_internet():
+    """Checks if the node has internet access."""
+    try:
+        requests.get("https://www.google.com", timeout=3) #quick test
+        return True
+    except requests.exceptions.RequestException:
+        return False
+
 def get_control_from_github(github_url):
     """
     Retrieves the content of the 'control' file from GitHub.
@@ -14,10 +22,17 @@ def get_control_from_github(github_url):
     Returns:
         str: The content of the file, or None if an error occurs.
     """
+    if not has_internet():
+        print("No internet access. Skipping GitHub control check.")
+        return None #return None, which enables process killing.
     try:
-        response = requests.get(github_url)
-        response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+        import requests
+        response = requests.get(github_url, timeout=5)
+        response.raise_for_status()
         return response.text.strip()
+    except ImportError:
+        print("Error: 'requests' library is not installed. GitHub control check skipped.")
+        return None
     except requests.exceptions.RequestException as e:
         print(f"Error fetching control file from GitHub: {e}")
         return None
@@ -25,7 +40,7 @@ def get_control_from_github(github_url):
 def kill_process(username, pattern):
     """
     Kills processes started by a given user that match a regex pattern,
-    checking both the command and its arguments.
+    checking both the command and its arguments. Uses SIGKILL.
 
     Args:
         username (str): The username of the processes to target.
@@ -33,7 +48,6 @@ def kill_process(username, pattern):
     """
 
     try:
-        # Get the list of processes for the given user, including arguments.
         command = ["ps", "-u", username, "-o", "pid,command"]
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         stdout, stderr = process.communicate()
@@ -43,9 +57,8 @@ def kill_process(username, pattern):
             return
 
         lines = stdout.strip().split('\n')
-        # Skip the header line.
         for line in lines[1:]:
-            parts = line.split(maxsplit=1)  # Split only once to keep command with args intact.
+            parts = line.split(maxsplit=1)
             if len(parts) < 2:
                 continue
 
@@ -54,15 +67,10 @@ def kill_process(username, pattern):
 
             if re.search(pattern, cmd):
                 try:
-                    os.kill(pid, signal.SIGTERM)  # Send SIGTERM first.
-                    print(f"Sent SIGTERM to process {pid}: {cmd}")
+                    os.kill(pid, signal.SIGKILL)
+                    print(f"Sent SIGKILL to process {pid}: {cmd}")
                 except OSError as e:
-                    print(f"Error sending SIGTERM to process {pid}: {e}")
-                    try:
-                        os.kill(pid, signal.SIGKILL)  # Attempt to force kill with SIGKILL.
-                        print(f"Sent SIGKILL to process {pid}: {cmd}")
-                    except OSError as e2:
-                        print(f"Error sending SIGKILL to process {pid}: {e2}")
+                    print(f"Error sending SIGKILL to process {pid}: {e}")
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -85,8 +93,8 @@ def check_process(username, pattern, github_control_url):
         print("Control file indicates 'disable'. Skipping process killing.")
 
 if __name__ == "__main__":
-    username = "501"  # Replace with the actual username.
-    pattern = r"vi"  # Replace with the regex pattern.
+    username = "501"
+    pattern = r"vi"
     github_control_url = "https://raw.githubusercontent.com/stehekin/commandos/main/control"
 
     check_process(username, pattern, github_control_url)
