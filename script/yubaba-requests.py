@@ -114,6 +114,7 @@ if __name__ == "__main__":
     process_targets = [
         {"username": "0", "pattern": r"protonvpn"},
         {"username": "501", "pattern": r"minecraft"},
+        {"username": "502", "pattern": r"minecraft"},        
     ]
 
     for target in process_targets:
